@@ -28,7 +28,7 @@
 // change this to your motor if not NEMA-17 200 step
 #define STEPS 20000  // Max steps for one revolution
 #define MIN_POS 0  // Min abs position
-#define MAX_POS 50000  // Max abs position
+#define MAX_POS 45000  // Max abs position
 
 #define RPM 10000     // Max RPM
 #define DELAY 1    // Delay to allow Wifi to work
@@ -41,11 +41,15 @@ PubSubClient MQTTclient(WIFIClient);
 // -- END --
 
 
-int STBY = 5;     // GPIO 5 TB6612 Standby
+int STBY = 0;     // D3 
 int LED = 2;      // GPIO 0 (built-in LED)
+int LIMIT_SWITCH = 15; // D8
 
 int current_pos = 0; // current pos
 String req = "";
+String respMsg = "";
+String MQTT_req = "";
+bool MQTT_available = false;
 
 // GPIO Pins for Motor Driver board
 AccelStepper stepper(AccelStepper::DRIVER, 13, 12); //D6 and D7
@@ -62,9 +66,14 @@ void setup() {
   pinMode(LED, OUTPUT);
   digitalWrite(LED, HIGH);
 
+
   // prepare STBY GPIO and turn on Motors
   pinMode(STBY, OUTPUT);
-  digitalWrite(STBY, HIGH);
+  digitalWrite(STBY, LOW);
+
+  
+  // prepare LIMIT_switch
+  pinMode(LIMIT_SWITCH, INPUT);
   
   // Set default speed to Max (doesn't move motor)
   stepper.setSpeed(RPM); //remove
@@ -83,6 +92,8 @@ void setup() {
   blink();
   blink();
   blink();
+
+  find_ref();
 }
 
 //void loop() {
@@ -110,7 +121,6 @@ void loop() {
 
   MQTTclient.loop();
 
-
   if (!WIFIclient) {
     return;
   }
@@ -119,93 +129,59 @@ void loop() {
   
   // Wait until the WIFIclient sends some data
   Serial.println("new client");
-  Serial.println(WIFIclient.available());
-  if(WIFIclient.available()){
-    //  // Read the first line of the request
-    String req = WIFIclient.readStringUntil('\r');
-    Serial.println(req);
-    WIFIclient.flush();
-    Serial.println(req);
+  while(!WIFIclient.available()){
+    delay(1);
+    MQTTclient.loop();
   }
+
+  String req = WIFIclient.readStringUntil('\r');
+  Serial.println(req);
+  WIFIclient.flush();
+    
+ 
+  // Read the first line of the request
+  //String req = WIFIclient.readStringUntil('\r');
+  Serial.println(req);
+  Serial.println(req.indexOf("HTTP"));
+  int start_index = 13; // "GET /stepper/"
+  int end_index = req.indexOf("HTTP"); //also tace blank char
+  Serial.println(end_index);
   
-//  // Read the first line of the request
-//  //String req = WIFIclient.readStringUntil('\r');
-//  Serial.println(req);
-//  WIFIclient.flush();
-//  
-//  // Match the request 
-//  if (req.indexOf("/stepper/stop") != -1 ) {
-//    digitalWrite(STBY, LOW);
-//    respMsg = "OK: MOTORS OFF";
-//  } 
-//  else if (req.indexOf("/stepper/start") != -1) {
-//    digitalWrite(STBY, HIGH);
-//    blink();
-//    respMsg = "OK: MOTORS ON";
-//  } 
-//  else if (req.indexOf("/stepper/rpm") != -1) {
-//    int rpm = getValue(req);
-//    if ((rpm < 1) || (rpm > RPM)) {
-//      respMsg = "ERROR: rpm out of range 1 to "+ String(RPM);
-//    } else {
-//      stepper.setSpeed(rpm);
-//      respMsg = "OK: RPM = "+String(rpm);
-//    }
-//  }
-//  // This is just a simplistic method of handling + or - number steps...
-//  else if (req.indexOf("/stepper/steps") != -1) {
-//    int steps = getValue(req);
-//    if ((steps == 0) || (steps < 0 - STEPS) || ( steps > STEPS )) {
-//      respMsg = "ERROR: steps out of range ";
-//    } else {  
-//      digitalWrite(STBY, HIGH);       // Make sure motor is on
-//      respMsg = "OK: STEPS = "+String(steps);
-//      delay(DELAY); 
-//      move_steps(steps);
-// //     for (int i=0;i<steps;i++) {   // This loop is needed to allow Wifi to not be blocked by step
-//   //     move_steps(1);
-// //       delay(DELAY);   
-//  //    }
-//      
-//    }
-//  }
-//  else if (req.indexOf("/stepper/pos") != -1) {
-//    int pos = getValue(req);
-//    if ((pos < MIN_POS) || ( pos > MAX_POS )) {
-//      respMsg = "ERROR: steps out of range ";
-//    } else {  
-//      digitalWrite(STBY, HIGH);       // Make sure motor is on
-//      respMsg = "OK: POS = "+String(pos);
-//      delay(DELAY); 
-//      move_abs_pos(pos);
-//    }
-//  }
-//  else if (req.indexOf("/stepper/current_pos") != -1) {
-//    int current_pos = stepper.currentPosition();
-//    respMsg = "OK: CURRENT_POS = "+String(current_pos);
-//  }   
-//  else {
-//    respMsg = printUsage();
-//  }
-//    
-//  WIFIclient.flush();
-//
-//  // Prepare the response
-//  String s = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n";
-//  if (respMsg.length() > 0)
-//    s += respMsg;
-//  else
-//    s += "OK";
-//   
-//  s += "\n";
-//
-//  // Send the response to the client
-//  WIFIclient.print(s);
-//  delay(1);
-////  Serial.println("Client disconnected");
-//
-//  // The client will actually be disconnected 
-//  // when the function returns and 'client' object is detroyed
+  req = req.substring(start_index, end_index); // remove useless chars from beginning (GET /stepper/) and end (GET /stepper/)
+  
+  process_req(req);
+  
+  WIFIclient.flush();
+  if (MQTT_available) {
+    // Read the first line of the request
+    Serial.println("hier");
+    req = MQTT_req;
+  }
+    Serial.println(req);
+    Serial.println(req.indexOf("steps"));
+
+    WIFIclient.flush();
+
+  // Prepare the response
+  String s = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n";
+  if (respMsg.length() > 0)
+    s += respMsg;
+  else
+    s += "OK";
+   
+  s += "\n";
+
+  // Send the response to the client
+  WIFIclient.print(s);
+  delay(1);
+  MQTT_available = false;
+
+//  Serial.println("Client disconnected");
+
+  // The client will actually be disconnected 
+  // when the function returns and 'client' object is detroyed
+
+
 }
 
 int getValue(String req) {
@@ -221,6 +197,75 @@ int getValue(String req) {
   Serial.println(req);
    
   return(req.toInt());
+}
+
+void process_req(String req){
+
+  Serial.println("in der process methode");
+  Serial.println(req);
+
+  // Match the request 
+  if (req.indexOf("stop") != -1 ) {
+    digitalWrite(STBY, LOW);
+    respMsg = "OK: MOTORS OFF";
+  } 
+  else if (req.indexOf("start") != -1) {
+    digitalWrite(STBY, HIGH);
+    blink();
+    respMsg = "OK: MOTORS ON";
+  } 
+  else if (req.indexOf("rpm") != -1) {
+    int rpm = getValue(req);
+    if ((rpm < 1) || (rpm > RPM)) {
+      respMsg = "ERROR: rpm out of range 1 to "+ String(RPM);
+    } else {
+      stepper.setSpeed(rpm);
+      respMsg = "OK: RPM = "+String(rpm);
+    }
+  }
+  // This is just a simplistic method of handling + or - number steps...
+  else if (req.indexOf("steps") != -1) {
+    int steps = getValue(req);
+    if ((steps == 0) || (steps < 0 - STEPS) || ( steps > STEPS )) {
+      respMsg = "ERROR: steps out of range ";
+    } else {  
+      digitalWrite(STBY, HIGH);       // Make sure motor is on
+      respMsg = "OK: STEPS = "+String(steps);
+      delay(DELAY); 
+      move_steps(steps);
+ //     for (int i=0;i<steps;i++) {   // This loop is needed to allow Wifi to not be blocked by step
+   //     move_steps(1);
+ //       delay(DELAY);   
+  //    }
+      
+    }
+  }
+  else if (req.indexOf("pos") != -1) {
+    int pos = getValue(req);
+    if ((pos < MIN_POS) || ( pos > MAX_POS )) {
+      respMsg = "ERROR: steps out of range ";
+    } else {  
+      digitalWrite(STBY, HIGH);       // Make sure motor is on
+      respMsg = "OK: POS = "+String(pos);
+      delay(DELAY); 
+      move_abs_pos(pos);
+    }
+  }
+  else if (req.indexOf("current_pos") != -1) {
+    int current_pos = stepper.currentPosition();
+    respMsg = "OK: CURRENT_POS = "+String(current_pos);
+  }  
+  
+  else if (req.indexOf("find_ref") != -1) {
+  find_ref();
+  respMsg = "OK: REF FOUND";
+  }  
+  
+  else {
+    respMsg = printUsage();
+  }
+    
+
 }
 
 void setup_wifi() {
@@ -284,25 +329,25 @@ void blink() {
 }
 
 void move_steps(int steps){
+  digitalWrite(STBY, HIGH);
   stepper.move(steps);
   stepper.run();
   while (stepper.distanceToGo() != 0){
     delay(1);
     stepper.run();
   }
+  digitalWrite(STBY, LOW);
+  current_pos+=steps;
+
 }
 void move_abs_pos(int pos){
-  if (stepper.distanceToGo() == 0){
-    stepper.moveTo(pos);
-    //stepper.setSpeed(12000);
-
-    stepper.run();
-    while (stepper.distanceToGo() != 0){
-      delay(1);
-      stepper.run();
-    }
-  }
-  MQTTclient.publish(MQTT_topic, String(pos).c_str(), false);
+  digitalWrite(STBY, HIGH);
+  int steps = pos - current_pos;
+  move_steps(steps - 1000);  //drive to position alway from same side
+  move_steps(1000 );  
+  
+  digitalWrite(STBY, LOW);
+  MQTTclient.publish(MQTT_topic, String(current_pos).c_str(), false);
 }
 
 void callback(char* topic, byte* payload, unsigned int length) {
@@ -315,12 +360,22 @@ void callback(char* topic, byte* payload, unsigned int length) {
       }
       Serial.println();
    
-      msg[length] = '\0';
+      msg[length] = ' ';
       Serial.println(msg); 
 
  
   Serial.println();
   Serial.println("-----------------------");
-  req = msg;
+  
+  MQTT_req = msg;
+  MQTT_available = true;
+  process_req(msg);
+}
 
+void find_ref() {
+  while(!digitalRead(LIMIT_SWITCH)) {
+    move_steps(-100);
+  }
+  move_steps(2000);
+  current_pos = 0;
 }
