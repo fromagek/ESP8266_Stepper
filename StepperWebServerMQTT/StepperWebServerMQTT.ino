@@ -33,7 +33,9 @@
 #define RPM 10000     // Max RPM
 #define DELAY 1    // Delay to allow Wifi to work
 
-#define MQTT_topic "badezimmer/boiler"
+#define MQTT_listen_topic "badezimmer/boiler"
+#define MQTT_talk_topic "badezimmer/boiler/current_pos"
+
 
 WiFiClient WIFIClient;
 PubSubClient MQTTclient(WIFIClient);
@@ -309,7 +311,7 @@ void reconnectMQTT() {
       delay(5000);
     }
   }
-  MQTTclient.subscribe(MQTT_topic);
+  MQTTclient.subscribe(MQTT_listen_topic);
 }
 
 String printUsage() {
@@ -339,6 +341,7 @@ void move_steps(int steps){
   digitalWrite(STBY, LOW);
   current_pos+=steps;
 
+
 }
 void move_abs_pos(int pos){
   digitalWrite(STBY, HIGH);
@@ -347,7 +350,12 @@ void move_abs_pos(int pos){
   move_steps(1000 );  
   
   digitalWrite(STBY, LOW);
-  MQTTclient.publish(MQTT_topic, String(current_pos).c_str(), false);
+    Serial.println("das ist er");
+
+  Serial.println(String(current_pos));
+  reconnectMQTT();
+  MQTTclient.publish(MQTT_talk_topic, String(current_pos).c_str(), false);
+
 }
 
 void callback(char* topic, byte* payload, unsigned int length) {
@@ -378,4 +386,7 @@ void find_ref() {
   }
   move_steps(2000);
   current_pos = 0;
+  reconnectMQTT();
+  MQTTclient.publish(MQTT_talk_topic, String(current_pos).c_str(), false);
+
 }
