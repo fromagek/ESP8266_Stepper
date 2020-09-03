@@ -95,7 +95,7 @@ void setup() {
   blink();
   blink();
 
-  find_ref();
+  find_ref(true);
 }
 
 //void loop() {
@@ -259,7 +259,7 @@ void process_req(String req){
   }  
   
   else if (req.indexOf("find_ref") != -1) {
-  find_ref();
+  find_ref(true);
   respMsg = "OK: REF FOUND";
   }  
   
@@ -348,7 +348,7 @@ void move_abs_pos(int pos){
   if (abs(current_pos-pos)>5){
     digitalWrite(STBY, HIGH);
     if (pos<5000){
-      find_ref();
+      find_ref(false);
       move_steps(pos);  
       current_pos=pos;
     }
@@ -387,13 +387,15 @@ void callback(char* topic, byte* payload, unsigned int length) {
   process_req(msg);
 }
 
-void find_ref() {
+void find_ref(bool set_pos) {
   while(!digitalRead(LIMIT_SWITCH)) {
     move_steps(-100);
   }
   move_steps(2000);
   current_pos = 1;
-  reconnectMQTT();
-  MQTTclient.publish(MQTT_talk_topic, String(current_pos).c_str(), false);
+  if (set_pos){
+    reconnectMQTT();
+    MQTTclient.publish(MQTT_talk_topic, String(current_pos).c_str(), false);    
+  }
 
 }
