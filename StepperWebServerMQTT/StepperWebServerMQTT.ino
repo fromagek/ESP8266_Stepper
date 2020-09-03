@@ -19,7 +19,7 @@
 // enter wifi and MQTT credetials in the Pass.h file and place it into the scetch folder
 //const char* ssid     = "xxx";    // YOUR WIFI SSID
 //const char* password = "xxx";    // YOUR WIFI PASSWORD 
-//const char* mqttServer = "xxx";
+const char* mqttServer = "192.168.178.34";
 //const int mqttPort = 1883;
 //const char* mqttUser = "xxx";
 //const char* mqttPassword = "xxx";
@@ -47,7 +47,7 @@ int STBY = 0;     // D3
 int LED = 2;      // GPIO 0 (built-in LED)
 int LIMIT_SWITCH = 15; // D8
 
-int current_pos = 0; // current pos
+int current_pos = 1; // current pos
 String req = "";
 String respMsg = "";
 String MQTT_req = "";
@@ -310,6 +310,7 @@ void reconnectMQTT() {
       // Wait 5 seconds before retrying
       delay(5000);
     }
+    delay(100);
   }
   MQTTclient.subscribe(MQTT_listen_topic);
 }
@@ -344,18 +345,24 @@ void move_steps(int steps){
 
 }
 void move_abs_pos(int pos){
-  digitalWrite(STBY, HIGH);
-  int steps = pos - current_pos;
-  move_steps(steps - 1000);  //drive to position alway from same side
-  move_steps(1000 );  
-  
-  digitalWrite(STBY, LOW);
+  if (abs(current_pos-pos)>5){
+    digitalWrite(STBY, HIGH);
+    if (pos<5000){
+      find_ref();
+      move_steps(pos);  
+      current_pos=pos;
+    }
+    else{
+      int steps = pos - current_pos;
+      move_steps(steps - 1000);  //drive to position always from same side
+      move_steps(1000); 
+    }
+    digitalWrite(STBY, LOW);
     Serial.println("das ist er");
-
-  Serial.println(String(current_pos));
-  reconnectMQTT();
-  MQTTclient.publish(MQTT_talk_topic, String(current_pos).c_str(), false);
-
+    Serial.println(String(current_pos));
+    reconnectMQTT();
+    MQTTclient.publish(MQTT_talk_topic, String(current_pos).c_str(), false); 
+  }
 }
 
 void callback(char* topic, byte* payload, unsigned int length) {
@@ -385,7 +392,7 @@ void find_ref() {
     move_steps(-100);
   }
   move_steps(2000);
-  current_pos = 0;
+  current_pos = 1;
   reconnectMQTT();
   MQTTclient.publish(MQTT_talk_topic, String(current_pos).c_str(), false);
 
